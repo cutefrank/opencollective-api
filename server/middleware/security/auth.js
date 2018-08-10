@@ -5,6 +5,8 @@ import {required_valid} from '../required_param';
 import roles from '../../constants/roles';
 import {authenticateUser} from './authentication';
 
+import models from '../../models';
+
 const {
   Forbidden, // I know who you are, but you permanently don't have access to this resource
   Unauthorized // You are not authorized, try to authenticate again
@@ -17,34 +19,32 @@ const {
 } = roles;
 
 /**
- * Authorize api_key
+ * Authorize Client App
  *
- * All calls should provide a valid api_key
+ * All calls should provide a valid Client Id (formerly Api Key)
  */
-export function authorizeApiKey(req, res, next) {
-
-  // TODO: we should remove those exceptions
-  // those routes should only be accessed via the website (which automatically adds the api_key)
-  const exceptions = [
-    { method: 'GET', regex: /^\/collectives\/[0-9]+\/transactions\/[0-9]+\/callback\?token=.+&paymentId=.+&PayerID=.+/ }, // PayPal callback
-    { method: 'GET', regex: /^\/collectives\/[0-9]+\/transactions\/[0-9]+\/callback\?token=.+/ }, // PayPal callback
-    { method: 'POST', regex: /^\/webhooks\/(mailgun|stripe)/ },
-    { method: 'GET', regex: /^\/connected-accounts\/(stripe|paypal)\/callback/ },
-    { method: 'GET', regex: /^\/services\/email\/approve\?messageId=.+/ },
-    { method: 'GET', regex: /^\/services\/email\/unsubscribe\/(.+)\/([a-zA-Z0-9-_]+)\/([a-zA-Z0-9-_\.]+)\/.+/ }
-  ];
-
-  for (const i in exceptions) {
-    if (req.method === exceptions[i].method && req.originalUrl.match(exceptions[i].regex)) return next();
+export async function authorizeClientApp(req, res, next) {
+  try {
+    const clientId = req.get('Client-Id') || req.query.clientId || req.query.api_key;
+    if (clientId) {
+      const app = await models.Application.findOne({ where: { clientId } });
+      if (app) {
+        req.clientApp = app;
+        next();
+        return;
+      } else if (clientId === config.keys.opencollective.api_key) {
+        next();
+        return;
+      } else {
+        next(new Unauthorized(`Invalid Client Id: ${clientId}.`));
+      }
+    } else {
+      next(new Unauthorized(`Missing Client Id.`));
+    }
+  } catch (e) {
+    console.log(e);
+    next(e);
   }
-
-  required_valid('api_key')(req, res, (e) => {
-    if (e) return next(e);
-    const api_key = req.required.api_key;
-    if (api_key !== config.keys.opencollective.api_key)
-      return next(new Unauthorized(`Invalid API key: ${api_key}`));
-    next();
-  });
 }
 
 /**
